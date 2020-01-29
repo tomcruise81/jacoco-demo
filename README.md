@@ -6,7 +6,7 @@ This application is to exemplify some issues with JaCoCo and Spring Boot Uber JA
 
 * JaCoCo version:  0.8.5
 * Operating system: Windows
-* Tool integration: CLI
+* Tool integration: Agent / CLI
 * Complete executable reproducer: https://github.com/tomcruise81/jacoco-demo.git
 * Steps: (what exactly are you doing with the above reproducer?)
     ```bash
