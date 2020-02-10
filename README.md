@@ -90,3 +90,66 @@ resulting in:
             at org.springframework.boot.loader.jar.JarFile.getNestedJarFile(JarFile.java:258)
             ... 6 more
 
+### Possible solution
+```bash
+git clone https://github.com/tomcruise81/jacoco-demo.git
+cd jacoco-demo
+
+# Download the appropriate JaCoCo JARs
+curl -k -L https://search.maven.org/remotecontent?filepath=org/jacoco/org.jacoco.cli/0.8.5/org.jacoco.cli-0.8.5-nodeps.jar -o ${curDir}/jacoco-cli.jar
+curl -k -L https://search.maven.org/remotecontent?filepath=org/jacoco/org.jacoco.agent/0.8.5/org.jacoco.agent-0.8.5-runtime.jar -o ${curDir}/jacoco-agent-runtime.jar
+
+# For Windows, under Git Bash, you may also need to convert Cygwin-type paths to Windows paths
+curDir=$(pwd)
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    CYGWIN*)    ;&
+    MINGW*)     curDir=$(cygpath -m ${curDir});;
+esac
+
+# Package the runnable JAR
+mvn clean package
+uberJar=$(ls target/*.jar | sed 's|target/||')
+uberJar=${curDir}/target/${uberJar}
+
+# Package the sources JAR
+mvn source:jar
+sourcesJar=$(ls target/*-sources.jar | sed 's|target/||')
+sourcesJar=${curDir}/target/${sourcesJar}
+
+################################################################
+# The purpose of this repo is to determine how to instrument a
+# pre-existing Spring Boot Uber JAR. So the setup above is just
+# to create the artifacts that are expected to be available for
+# this use-case.
+################################################################
+
+# Determine the includes list; the sources JAR includes all expected source files, and their corresponding packages
+# Instead of including every source file, just include their respective packages
+includes=$(zipinfo -2 ${sourcesJar} -x META-INF/** | grep -E '*.java' | awk -F/ 'BEGIN { OFS = FS }; NF { NF -= 1 }; 1' | uniq | sed 's|/|.|g' | awk -v suffix=".*" '{print $0 suffix}' | paste -sd ":" -)
+
+# Run JaCoCo
+rm -f jacoco.exec
+java -javaagent:${curDir}/jacoco-agent-runtime.jar=destfile=${curDir}/jacoco.exec,includes=${includes},output=file,dumponexit=true -jar ${uberJar}
+# The following blows up with "java.lang.IllegalStateException: Can't add different class with same name:..."
+# java -jar ${curDir}/jacoco-cli.jar report jacoco.exec --classfiles=${uberJar} --html ${curDir}/coverage-html
+
+# Extract the Uber JAR and explicitly determine which class files to report on as per the includes list (i.e. source packages)
+tempClassfilesDir=$(mktemp -d)
+unzip ${uberJar} -d ${tempClassfilesDir}
+includesFilter=$(echo ${includes} | sed 's/:/|/g')
+classfiles=$(zipinfo -2 ${uberJar} | grep -E ${includesFilter} | grep -E '*\.class' | awk -F/ 'BEGIN { OFS = FS }; NF { NF -= 1 }; 1' | uniq | awk -v prefix="--classfiles=${tempClassfilesDir}/" -v suffix="/" '{print prefix $0 suffix}' | paste -sd " " -)
+
+# Extract the source JAR so that source files can be linked during reporting
+tempSourcefilesDir=$(mktemp -d)
+unzip ${sourcesJar} -d ${tempSourcefilesDir}
+
+# Do the actual reporting
+htmlCoverageDir=${curDir}/reports/coverage-html
+rm -rf ${htmlCoverageDir}
+java -jar ${curDir}/jacoco-cli.jar report jacoco.exec ${classfiles} --sourcefiles=${tempSourcefilesDir} --html ${htmlCoverageDir}
+
+# Cleanup
+rm -rf ${tempSourcefilesDir}
+rm -rf ${tempClassfilesDir}
+```
